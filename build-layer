@@ -1,10 +1,12 @@
 #! /bin/sh
 set -ex
 
-mkdir dev sys proc bin sbin usr usr/bin usr/sbin
+mkdir dev
 mknod dev/null    -m 0666 c 1 3
 mknod dev/tty     -m 0666 c 5 0
 mknod dev/console -m 0600 c 5 1
+
+mkdir sys proc bin sbin usr usr/bin usr/sbin
 
 curl -L -o bin/busybox https://busybox.net/downloads/binaries/$busybox_v/busybox-$arch
 chmod +x bin/busybox

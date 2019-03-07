@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -33,6 +34,8 @@ type config struct {
 }
 
 func main() {
+	runtime.LockOSThread()
+
 	log.Print("Welcome to ", VERSION)
 
 	// essential mounts
@@ -133,11 +136,9 @@ func main() {
 
 	// switch root
 	log.Print("switching root")
-	err = syscall.Exec("/sbin/switch_root", []string{"switch_root", "/system", "/sbin/init"}, os.Environ())
-	if err != nil {
-		log.Print("switch_root failed: ", err)
-		select {}
-	}
+	err = syscall.Exec("/sbin/switch_root", []string{"switch_root",
+		"-c", "/dev/console", "/system", "/sbin/init"}, os.Environ())
+	fatal("switch_root failed: ", err)
 }
 
 func layerPath(name string) string {
@@ -147,18 +148,12 @@ func layerPath(name string) string {
 func fatal(v ...interface{}) {
 	log.Print("*** FATAL ***")
 	log.Print(v...)
-	dropToShell()
+	select {}
 }
 
 func fatalf(pattern string, v ...interface{}) {
 	log.Print("*** FATAL ***")
 	log.Printf(pattern, v...)
-	dropToShell()
-}
-
-func dropToShell() {
-	err := syscall.Exec("/bin/sh", []string{"/bin/sh"}, os.Environ())
-	log.Print("shell drop failed: ", err)
 	select {}
 }
 
