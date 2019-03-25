@@ -29,10 +29,6 @@ var (
 	bootVersion string
 )
 
-type config struct {
-	Layers []string `yaml:"layers"`
-}
-
 func main() {
 	runtime.LockOSThread()
 
