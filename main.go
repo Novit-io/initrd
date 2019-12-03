@@ -127,6 +127,15 @@ func main() {
 		fatal("failed: ", err)
 	}
 
+	// - write files
+	for _, fileDef := range cfg.Files {
+		log.Print("writing ", fileDef.Path)
+
+		filePath := filepath.Join("/system", fileDef.Path)
+
+		ioutil.WriteFile(filePath, []byte(fileDef.Content), fileDef.Mode)
+	}
+
 	// clean zombies
 	cleanZombies()
 
