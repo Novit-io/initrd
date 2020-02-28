@@ -11,13 +11,29 @@ func param(name, defaultValue string) (value string) {
 		fatal("could not read /proc/cmdline: ", err)
 	}
 
-	prefix := "direktil." + name + "="
+	prefixes := []string{
+		"direktil." + name + "=",
+		"dkl." + name + "=",
+	}
+
+	value = defaultValue
 
 	for _, part := range strings.Split(string(ba), " ") {
-		if strings.HasPrefix(part, prefix) {
-			return strings.TrimSpace(part[len(prefix):])
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(part, prefix) {
+				value = strings.TrimSpace(part[len(prefix):])
+			}
 		}
 	}
 
-	return defaultValue
+	return
+}
+
+func paramBool(name string, defaultValue bool) (value bool) {
+	defaultValueS := "false"
+	if defaultValue {
+		defaultValueS = "true"
+	}
+
+	return "true" == param(name, defaultValueS)
 }

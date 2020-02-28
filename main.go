@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -45,6 +46,7 @@ func main() {
 
 	// find and mount /boot
 	bootMatch := param("boot", "")
+	bootMounted := false
 	if bootMatch != "" {
 		bootFS := param("boot.fs", "vfat")
 		for i := 0; ; i++ {
@@ -64,6 +66,7 @@ func main() {
 			log.Print("boot partition found: ", devFile)
 
 			mount(devFile, "/boot", bootFS, bootMountFlags, "")
+			bootMounted = true
 			break
 		}
 	} else {
@@ -90,6 +93,14 @@ func main() {
 
 	log.Printf("wanted layers: %q", cfg.Layers)
 
+	layersInMemory := paramBool("layers-in-mem", false)
+
+	const layersInMemDir = "/layers-in-mem"
+	if layersInMemory {
+		mkdir(layersInMemDir, 0700)
+		mount("layers-mem", layersInMemDir, "tmpfs", 0, "")
+	}
+
 	lowers := make([]string, len(cfg.Layers))
 	for i, layer := range cfg.Layers {
 		path := layerPath(layer)
@@ -100,6 +111,13 @@ func main() {
 		}
 
 		log.Printf("layer %s found (%d bytes)", layer, info.Size())
+
+		if layersInMemory {
+			log.Print("  copying to memory...")
+			targetPath := filepath.Join(layersInMemDir, layer)
+			cp(path, targetPath)
+			path = targetPath
+		}
 
 		dir := "/layers/" + layer
 
@@ -119,7 +137,14 @@ func main() {
 
 	mount("overlay", "/system", "overlay", rootMountFlags,
 		"lowerdir="+strings.Join(lowers, ":")+",upperdir=/changes/upperdir,workdir=/changes/workdir")
-	mount("/boot", "/system/boot", "", syscall.MS_BIND, "")
+
+	// mount("/boot", "/system/boot", "", syscall.MS_BIND, "")
+	if layersInMemory && bootMounted {
+		if err := syscall.Unmount("/boot", 0); err != nil {
+			log.Print("WARNING: failed to unmount /boot: ", err)
+			time.Sleep(2 * time.Second)
+		}
+	}
 
 	// - write configuration
 	log.Print("writing /config.yaml")
@@ -187,4 +212,29 @@ func mount(source, target, fstype string, flags uintptr, data string) {
 		fatalf("mount %q %q -t %q -o %q failed: %v", source, target, fstype, data, err)
 	}
 	log.Printf("mounted %q", target)
+}
+
+func cp(srcPath, dstPath string) {
+	var err error
+	defer func() {
+		if err != nil {
+			fatalf("cp %s %s failed: %v", srcPath, dstPath, err)
+		}
+	}()
+
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return
+	}
+
+	defer src.Close()
+
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		return
+	}
+
+	defer dst.Close()
+
+	_, err = io.Copy(dst, src)
 }
