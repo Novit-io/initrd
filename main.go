@@ -138,11 +138,15 @@ func main() {
 	mount("overlay", "/system", "overlay", rootMountFlags,
 		"lowerdir="+strings.Join(lowers, ":")+",upperdir=/changes/upperdir,workdir=/changes/workdir")
 
-	// mount("/boot", "/system/boot", "", syscall.MS_BIND, "")
-	if layersInMemory && bootMounted {
-		if err := syscall.Unmount("/boot", 0); err != nil {
-			log.Print("WARNING: failed to unmount /boot: ", err)
-			time.Sleep(2 * time.Second)
+	if bootMounted {
+		if layersInMemory {
+			if err := syscall.Unmount("/boot", 0); err != nil {
+				log.Print("WARNING: failed to unmount /boot: ", err)
+				time.Sleep(2 * time.Second)
+			}
+
+		} else {
+			mount("/boot", "/system/boot", "", syscall.MS_BIND, "")
 		}
 	}
 
