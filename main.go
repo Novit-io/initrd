@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/term"
 	yaml "gopkg.in/yaml.v2"
 	"novit.nc/direktil/pkg/sysfs"
 )
@@ -182,13 +183,39 @@ func layerPath(name string) string {
 func fatal(v ...interface{}) {
 	log.Print("*** FATAL ***")
 	log.Print(v...)
-	select {}
+	die()
 }
 
 func fatalf(pattern string, v ...interface{}) {
 	log.Print("*** FATAL ***")
 	log.Printf(pattern, v...)
-	select {}
+	die()
+}
+
+func die() {
+	fmt.Println("\nwill reboot in 1 minute; press r to reboot now, o to power off")
+
+	deadline := time.Now().Add(time.Minute)
+
+	term.MakeRaw(int(os.Stdin.Fd())) // disable line buffering
+	os.Stdin.SetReadDeadline(deadline)
+
+	b := []byte{0}
+	for {
+		_, err := os.Stdin.Read(b)
+		if err != nil {
+			break
+		}
+
+		switch b[0] {
+		case 'o':
+			syscall.Reboot(syscall.LINUX_REBOOT_CMD_POWER_OFF)
+		case 'r':
+			syscall.Reboot(syscall.LINUX_REBOOT_CMD_RESTART)
+		}
+	}
+
+	syscall.Reboot(syscall.LINUX_REBOOT_CMD_RESTART)
 }
 
 func losetup(dev, file string) {
