@@ -19,7 +19,7 @@ import (
 
 const (
 	// VERSION is the current version of init
-	VERSION = "Direktil init v0.1"
+	VERSION = "Direktil init v1.0"
 
 	rootMountFlags  = 0
 	bootMountFlags  = syscall.MS_NOEXEC | syscall.MS_NODEV | syscall.MS_NOSUID | syscall.MS_RDONLY
