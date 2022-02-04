@@ -1,0 +1,43 @@
+---
+# early system configuration
+
+modules: /modules.sqfs
+
+networks:
+- name: main
+  ifaces:
+  - var: iface
+    n: 1
+    regexps:
+    - eth.*
+    - veth.*
+    - eno.*
+    - enp.*
+  script: |
+    # hello
+    . /env
+    ip a add $address dev $iface
+    ip route add default via $gateway
+    ip li set $iface up
+
+lvm:
+  pvs:
+    n: 1
+    regexps:
+    - /dev/nvme[0-9]+n[0-9]+p[0-9]+
+    - /dev/vd[a-z]+[0-9]+
+    - /dev/sd[a-z]+[0-9]+
+
+  defaults:
+    fs: ext4
+    tags: [ encrypt ]
+
+  lvs:
+  - name: bootstrap
+    tags: [ bootstrap, -encrypt ]
+    size: 2g
+
+  - name: dls
+    mountPoint: /var/lib/direktil
+    size: 100%FREE
+

@@ -1,19 +1,18 @@
 # ------------------------------------------------------------------------
-from mcluseau/golang-builder:1.15.5 as build
+from alpine:3.15
 
-# ------------------------------------------------------------------------
-from alpine:3.12
+add alpine/alpine-minirootfs-3.15.0-x86_64.tar.gz /layer/
 
-env busybox_v=1.28.1-defconfig-multiarch \
-    arch=x86_64
-
-run apk add --update curl
+run apk update
+run apk add -p /layer lvm2-static
 
 workdir /layer
 
-add build-layer /
-run /build-layer
+run rm -rf usr/share/apk var/cache/apk
 
-copy --from=build /go/bin/initrd /layer/init
+#add build-layer /
+#run /build-layer
+
+copy dist/init /layer/init
 
 entrypoint ["sh","-c","find |cpio -H newc -o |base64"]

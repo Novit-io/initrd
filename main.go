@@ -3,24 +3,19 @@ package main
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
 	"golang.org/x/term"
-	yaml "gopkg.in/yaml.v2"
-	"novit.nc/direktil/pkg/sysfs"
 )
 
 const (
 	// VERSION is the current version of init
-	VERSION = "Direktil init v1.0"
+	VERSION = "Direktil init v2.0"
 
 	rootMountFlags  = 0
 	bootMountFlags  = syscall.MS_NOEXEC | syscall.MS_NODEV | syscall.MS_NOSUID | syscall.MS_RDONLY
@@ -45,135 +40,16 @@ func main() {
 	bootVersion = param("version", "current")
 	log.Printf("booting system %q", bootVersion)
 
-	// find and mount /boot
-	bootMatch := param("boot", "")
-	bootMounted := false
-	if bootMatch != "" {
-		bootFS := param("boot.fs", "vfat")
-		for i := 0; ; i++ {
-			devNames := sysfs.DeviceByProperty("block", bootMatch)
-
-			if len(devNames) == 0 {
-				if i > 30 {
-					fatal("boot partition not found after 30s")
-				}
-				log.Print("boot partition not found, retrying")
-				time.Sleep(1 * time.Second)
-				continue
-			}
-
-			devFile := filepath.Join("/dev", devNames[0])
-
-			log.Print("boot partition found: ", devFile)
-
-			mount(devFile, "/boot", bootFS, bootMountFlags, "")
-			bootMounted = true
-			break
-		}
-	} else {
-		log.Print("Assuming /boot is already populated.")
-	}
-
-	// load config
-	cfgPath := param("config", "/boot/config.yaml")
-
-	cfgBytes, err := ioutil.ReadFile(cfgPath)
+	_, err := os.Stat("/config.yaml")
 	if err != nil {
-		fatalf("failed to read %s: %v", cfgPath, err)
-	}
-
-	cfg := &config{}
-	if err := yaml.Unmarshal(cfgBytes, cfg); err != nil {
-		fatal("failed to load config: ", err)
-	}
-
-	// mount layers
-	if len(cfg.Layers) == 0 {
-		fatal("no layers configured!")
-	}
-
-	log.Printf("wanted layers: %q", cfg.Layers)
-
-	layersInMemory := paramBool("layers-in-mem", false)
-
-	const layersInMemDir = "/layers-in-mem"
-	if layersInMemory {
-		mkdir(layersInMemDir, 0700)
-		mount("layers-mem", layersInMemDir, "tmpfs", 0, "")
-	}
-
-	lowers := make([]string, len(cfg.Layers))
-	for i, layer := range cfg.Layers {
-		path := layerPath(layer)
-
-		info, err := os.Stat(path)
-		if err != nil {
-			fatal(err)
+		if os.IsNotExist(err) {
+			bootV1()
+			return
 		}
-
-		log.Printf("layer %s found (%d bytes)", layer, info.Size())
-
-		if layersInMemory {
-			log.Print("  copying to memory...")
-			targetPath := filepath.Join(layersInMemDir, layer)
-			cp(path, targetPath)
-			path = targetPath
-		}
-
-		dir := "/layers/" + layer
-
-		lowers[i] = dir
-
-		loopDev := fmt.Sprintf("/dev/loop%d", i)
-		losetup(loopDev, path)
-
-		mount(loopDev, dir, "squashfs", layerMountFlags, "")
+		fatal("stat failed: ", err)
 	}
 
-	// prepare system root
-	mount("mem", "/changes", "tmpfs", 0, "")
-
-	mkdir("/changes/workdir", 0755)
-	mkdir("/changes/upperdir", 0755)
-
-	mount("overlay", "/system", "overlay", rootMountFlags,
-		"lowerdir="+strings.Join(lowers, ":")+",upperdir=/changes/upperdir,workdir=/changes/workdir")
-
-	if bootMounted {
-		if layersInMemory {
-			if err := syscall.Unmount("/boot", 0); err != nil {
-				log.Print("WARNING: failed to unmount /boot: ", err)
-				time.Sleep(2 * time.Second)
-			}
-
-		} else {
-			mount("/boot", "/system/boot", "", syscall.MS_BIND, "")
-		}
-	}
-
-	// - write configuration
-	log.Print("writing /config.yaml")
-	if err := ioutil.WriteFile("/system/config.yaml", cfgBytes, 0600); err != nil {
-		fatal("failed: ", err)
-	}
-
-	// - write files
-	for _, fileDef := range cfg.Files {
-		log.Print("writing ", fileDef.Path)
-
-		filePath := filepath.Join("/system", fileDef.Path)
-
-		ioutil.WriteFile(filePath, []byte(fileDef.Content), fileDef.Mode)
-	}
-
-	// clean zombies
-	cleanZombies()
-
-	// switch root
-	log.Print("switching root")
-	err = syscall.Exec("/sbin/switch_root", []string{"switch_root",
-		"-c", "/dev/console", "/system", "/sbin/init"}, os.Environ())
-	fatal("switch_root failed: ", err)
+	bootV2()
 }
 
 func layerPath(name string) string {
@@ -193,7 +69,7 @@ func fatalf(pattern string, v ...interface{}) {
 }
 
 func die() {
-	fmt.Println("\nwill reboot in 1 minute; press r to reboot now, o to power off")
+	fmt.Println("\nwill reboot in 1 minute; press r to reboot now, o to power off, s to get a shell")
 
 	deadline := time.Now().Add(time.Minute)
 
@@ -207,11 +83,18 @@ func die() {
 			break
 		}
 
+		fmt.Println(string(b))
+
 		switch b[0] {
 		case 'o':
 			syscall.Reboot(syscall.LINUX_REBOOT_CMD_POWER_OFF)
 		case 'r':
 			syscall.Reboot(syscall.LINUX_REBOOT_CMD_RESTART)
+		case 's':
+			err = syscall.Exec("/bin/ash", []string{"/bin/ash"}, os.Environ())
+			if err != nil {
+				fmt.Println("failed to start the shell:", err)
+			}
 		}
 	}
 

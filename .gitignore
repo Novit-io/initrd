@@ -1,1 +1,4 @@
 .*.sw[po]
+/dist
+/qemu.pid
+/test-initrd.cpio
