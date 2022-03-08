@@ -22,12 +22,25 @@ func Append(out io.Writer, in io.Reader, filesToAppend []string) (err error) {
 			return
 		}
 
+		mode := hdr.FileInfo().Mode()
+
+		if mode&os.ModeSymlink != 0 {
+			// symlink target must be written after
+			hdr.Size = int64(len(hdr.Linkname))
+		}
+
 		err = cout.WriteHeader(hdr)
 		if err != nil {
 			return
 		}
 
-		_, err = io.Copy(cout, cin)
+		if mode.IsRegular() {
+			_, err = io.Copy(cout, cin)
+
+		} else if mode&os.ModeSymlink != 0 {
+			_, err = cout.Write([]byte(hdr.Linkname))
+		}
+
 		if err != nil {
 			return
 		}
@@ -35,26 +48,41 @@ func Append(out io.Writer, in io.Reader, filesToAppend []string) (err error) {
 
 	for _, file := range filesToAppend {
 		err = func() (err error) {
-			stat, err := os.Stat(file)
+			stat, err := os.Lstat(file)
 			if err != nil {
 				return
 			}
 
-			hdr := &cpio.Header{
-				Name: file,
-				Size: stat.Size(),
-				Mode: cpio.FileMode(stat.Mode()),
+			link := ""
+			if stat.Mode()&os.ModeSymlink != 0 {
+				link, err = os.Readlink(file)
+				if err != nil {
+					return
+				}
 			}
+
+			hdr, err := cpio.FileInfoHeader(stat, link)
+			if err != nil {
+				return
+			}
+
+			hdr.Name = file
 
 			cout.WriteHeader(hdr)
 
-			f, err := os.Open(file)
-			if err != nil {
-				return
-			}
-			defer f.Close()
+			if stat.Mode().IsRegular() {
+				var f *os.File
+				f, err = os.Open(file)
+				if err != nil {
+					return
+				}
+				defer f.Close()
 
-			_, err = io.Copy(cout, f)
+				_, err = io.Copy(cout, f)
+
+			} else if stat.Mode()&os.ModeSymlink != 0 {
+				_, err = cout.Write([]byte(link))
+			}
 			return
 		}()
 		if err != nil {

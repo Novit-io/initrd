@@ -2,3 +2,4 @@
 /dist
 /qemu.pid
 /test-initrd.cpio
+/tmp

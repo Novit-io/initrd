@@ -6,11 +6,16 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"syscall"
 	"time"
 
+	"github.com/pkg/term/termios"
 	"golang.org/x/term"
+
+	"novit.nc/direktil/initrd/colorio"
+	"novit.nc/direktil/initrd/shio"
 )
 
 const (
@@ -24,10 +29,26 @@ const (
 
 var (
 	bootVersion string
+
+	stdin,
+	stdinPipe = newPipe()
+	stdout = shio.New()
+	stderr = colorio.NewWriter(colorio.Bold, stdout)
 )
+
+func newPipe() (io.ReadCloser, io.WriteCloser) {
+	return io.Pipe()
+}
 
 func main() {
 	runtime.LockOSThread()
+
+	// move log to shio
+	go io.Copy(os.Stdout, stdout.NewReader())
+	log.SetOutput(stderr)
+
+	// copy os.Stdin to my stdin pipe
+	go io.Copy(stdinPipe, os.Stdin)
 
 	log.Print("Welcome to ", VERSION)
 
@@ -35,10 +56,13 @@ func main() {
 	mount("none", "/proc", "proc", 0, "")
 	mount("none", "/sys", "sysfs", 0, "")
 	mount("none", "/dev", "devtmpfs", 0, "")
+	mount("none", "/dev/pts", "devpts", 0, "gid=5,mode=620")
 
 	// get the "boot version"
 	bootVersion = param("version", "current")
 	log.Printf("booting system %q", bootVersion)
+
+	os.Setenv("PATH", "/usr/bin:/bin:/usr/sbin:/sbin")
 
 	_, err := os.Stat("/config.yaml")
 	if err != nil {
@@ -52,8 +76,16 @@ func main() {
 	bootV2()
 }
 
+var (
+	layersDir      = "/boot/current/layers/"
+	layersOverride = map[string]string{}
+)
+
 func layerPath(name string) string {
-	return fmt.Sprintf("/boot/%s/layers/%s.fs", bootVersion, name)
+	if override, ok := layersOverride[name]; ok {
+		return override
+	}
+	return filepath.Join(layersDir, name+".fs")
 }
 
 func fatal(v ...interface{}) {
@@ -69,21 +101,36 @@ func fatalf(pattern string, v ...interface{}) {
 }
 
 func die() {
-	fmt.Println("\nwill reboot in 1 minute; press r to reboot now, o to power off, s to get a shell")
+	log.SetOutput(os.Stderr)
+	stdout.Close()
+	stdin.Close()
+	stdinPipe.Close()
 
-	deadline := time.Now().Add(time.Minute)
+	stdin = nil
 
-	term.MakeRaw(int(os.Stdin.Fd())) // disable line buffering
-	os.Stdin.SetReadDeadline(deadline)
-
-	b := []byte{0}
+mainLoop:
 	for {
+		termios.Tcdrain(os.Stdin.Fd())
+		termios.Tcdrain(os.Stdout.Fd())
+		termios.Tcdrain(os.Stderr.Fd())
+
+		fmt.Print("\nr to reboot, o to power off, s to get a shell: ")
+
+		// TODO flush stdin (first char lost here?)
+		deadline := time.Now().Add(time.Minute)
+		os.Stdin.SetReadDeadline(deadline)
+
+		termios.Tcflush(os.Stdin.Fd(), termios.TCIFLUSH)
+		term.MakeRaw(int(os.Stdin.Fd()))
+
+		b := make([]byte, 1)
 		_, err := os.Stdin.Read(b)
 		if err != nil {
-			break
+			log.Print("failed to read from stdin: ", err)
+			time.Sleep(5 * time.Second)
+			syscall.Reboot(syscall.LINUX_REBOOT_CMD_RESTART)
 		}
-
-		fmt.Println(string(b))
+		fmt.Println()
 
 		switch b[0] {
 		case 'o':
@@ -91,18 +138,42 @@ func die() {
 		case 'r':
 			syscall.Reboot(syscall.LINUX_REBOOT_CMD_RESTART)
 		case 's':
-			err = syscall.Exec("/bin/ash", []string{"/bin/ash"}, os.Environ())
-			if err != nil {
-				fmt.Println("failed to start the shell:", err)
+			for _, sh := range []string{"bash", "ash", "sh", "busybox"} {
+				fullPath, err := exec.LookPath(sh)
+				if err != nil {
+					continue
+				}
+
+				args := make([]string, 0)
+				if sh == "busybox" {
+					args = append(args, "sh")
+				}
+
+				if !localAuth() {
+					continue mainLoop
+				}
+
+				cmd := exec.Command(fullPath, args...)
+				cmd.Env = os.Environ()
+				cmd.Stdin = os.Stdin
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				err = cmd.Run()
+				if err != nil {
+					fmt.Println("shell failed:", err)
+				}
+				continue mainLoop
 			}
+			log.Print("failed to find a shell!")
+
+		default:
+			log.Printf("unknown choice: %q", string(b))
 		}
 	}
-
-	syscall.Reboot(syscall.LINUX_REBOOT_CMD_RESTART)
 }
 
 func losetup(dev, file string) {
-	run("/sbin/losetup", dev, file)
+	run("/sbin/losetup", "-r", dev, file)
 }
 
 func run(cmd string, args ...string) {

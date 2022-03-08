@@ -14,7 +14,11 @@ import (
 	"novit.nc/direktil/pkg/sysfs"
 )
 
+var loopOffset = 0
+
 func bootV1() {
+	log.Print("-- boot v1 --")
+
 	// find and mount /boot
 	bootMatch := param("boot", "")
 	bootMounted := false
@@ -47,12 +51,19 @@ func bootV1() {
 	// load config
 	cfgPath := param("config", "/boot/config.yaml")
 
+	layersDir = filepath.Join("/boot", bootVersion, "layers")
+	applyConfig(cfgPath, bootMounted)
+
+	finalizeBoot()
+}
+
+func applyConfig(cfgPath string, bootMounted bool) (cfg *configV1) {
 	cfgBytes, err := ioutil.ReadFile(cfgPath)
 	if err != nil {
 		fatalf("failed to read %s: %v", cfgPath, err)
 	}
 
-	cfg := &config{}
+	cfg = &configV1{}
 	if err := yaml.Unmarshal(cfgBytes, cfg); err != nil {
 		fatal("failed to load config: ", err)
 	}
@@ -94,7 +105,7 @@ func bootV1() {
 
 		lowers[i] = dir
 
-		loopDev := fmt.Sprintf("/dev/loop%d", i)
+		loopDev := fmt.Sprintf("/dev/loop%d", i+loopOffset)
 		losetup(loopDev, path)
 
 		mount(loopDev, dir, "squashfs", layerMountFlags, "")
@@ -136,12 +147,16 @@ func bootV1() {
 		ioutil.WriteFile(filePath, []byte(fileDef.Content), fileDef.Mode)
 	}
 
+	return
+}
+
+func finalizeBoot() {
 	// clean zombies
 	cleanZombies()
 
 	// switch root
 	log.Print("switching root")
-	err = syscall.Exec("/sbin/switch_root", []string{"switch_root",
+	err := syscall.Exec("/sbin/switch_root", []string{"switch_root",
 		"-c", "/dev/console", "/system", "/sbin/init"}, os.Environ())
 	fatal("switch_root failed: ", err)
 }

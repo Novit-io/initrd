@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"log"
 	"os"
 
 	"novit.nc/direktil/initrd/cpiocat"
@@ -10,5 +11,8 @@ import (
 func main() {
 	flag.Parse()
 
-	cpiocat.Append(os.Stdout, os.Stdin, flag.Args())
+	err := cpiocat.Append(os.Stdout, os.Stdin, flag.Args())
+	if err != nil {
+		log.Fatal(err)
+	}
 }

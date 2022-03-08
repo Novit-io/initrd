@@ -6,6 +6,8 @@ import (
 )
 
 func cleanZombies() {
+	return // FIXME noop... udhcpc is a daemon staying alive so we never finish
+
 	var wstatus syscall.WaitStatus
 
 	for {

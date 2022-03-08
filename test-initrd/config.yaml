@@ -1,11 +1,23 @@
 ---
 # early system configuration
+anti_phishing_code: "direktil<3"
 
 modules: /modules.sqfs
 
+auths:
+  - name:     novit
+    sshKey:   ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICkpbU6sf4t0f6XAv9DuW3XH5iLM0AI5rc8PT2jwea1N
+    password: bXlzZWVk:HMSxrg1cYphaPuUYUbtbl/htep/tVYYIQAuvkNMVpw0 # mypass
+
 networks:
+- name: loopback
+  interfaces: [ { var: iface, n: 1, regexps: [ "^lo$" ] } ]
+  script: |
+    ip a add 127.0.0.1/8 dev lo
+    ip a add ::1/128 dev lo
+    ip li set lo up
 - name: main
-  ifaces:
+  interfaces:
   - var: iface
     n: 1
     regexps:
@@ -14,30 +26,44 @@ networks:
     - eno.*
     - enp.*
   script: |
-    # hello
-    . /env
-    ip a add $address dev $iface
-    ip route add default via $gateway
     ip li set $iface up
+    udhcpc $iface
 
 lvm:
+- vg: storage
   pvs:
-    n: 1
+    n: 2
     regexps:
-    - /dev/nvme[0-9]+n[0-9]+p[0-9]+
-    - /dev/vd[a-z]+[0-9]+
-    - /dev/sd[a-z]+[0-9]+
+    # to match full disks
+    - /dev/nvme[0-9]+n[0-9]+
+    - /dev/vd[a-z]+
+    - /dev/sd[a-z]+
+    - /dev/hd[a-z]+
+    # to match partitions:
+    #- /dev/nvme[0-9]+n[0-9]+p[0-9]+
+    #- /dev/vd[a-z]+[0-9]+
+    #- /dev/sd[a-z]+[0-9]+
+    #- /dev/hd[a-z]+[0-9]+
 
   defaults:
     fs: ext4
-    tags: [ encrypt ]
+    raid:
+      mirrors: 1
 
   lvs:
   - name: bootstrap
-    tags: [ bootstrap, -encrypt ]
+    crypt: bootstrap
     size: 2g
 
+  - name: varlog
+    crypt: varlog
+    extents: 10%FREE
+
   - name: dls
-    mountPoint: /var/lib/direktil
-    size: 100%FREE
+    crypt: dls
+    extents: 100%FREE
+
+bootstrap:
+  dev: /dev/mapper/bootstrap
+  #seed: https://direktil.novit.io/bootstraps/dls
 
